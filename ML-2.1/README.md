@@ -1,8 +1,7 @@
 # Log Mining
 **Data**:
-the [NASA access log July 1995 data](ftp://ita.ee.lbl.gov/traces/NASA_access_log_Jul95.gz).
-Please read the *[dataset description](ftp://ita.ee.lbl.gov/html/contrib/NASA-HTTP.html)* to understand the data and complete the following four tasks.
-
+the *NASA access log July 1995 data(ftp://ita.ee.lbl.gov/traces/NASA_access_log_Jul95.gz)*.
+Please read the *dataset description(ftp://ita.ee.lbl.gov/html/contrib/NASA-HTTP.html)* to understand the data and complete the following four tasks.
 
 A. Find out the **average number** of requests on each four hours of a day of July 1995 by the local time (i.e. 00:00:00-03:59:59; 04:00:00-07:59:59; 08:00:00-11:59:59; 12:00:00-15:59:59; 16:00:00-19:59:59; 20:00:00-23:59:59). The average is taken over the days in July. You need to report **SIX** numbers, one for each of these four-hour slot.
 
