@@ -1,0 +1,179 @@
+# import the library all the time  XD GL
+import time
+from pyspark.sql import SparkSession
+import pyspark.sql.functions as sql
+from pyspark.ml import Pipeline
+from pyspark.ml.feature import StringIndexer, VectorAssembler
+from pyspark.sql.functions import split,regexp_extract
+from pyspark.sql.types import DecimalType,IntegerType,DoubleType
+from pyspark.ml.tuning import CrossValidator, ParamGridBuilder
+from pyspark.ml.classification import RandomForestClassifier
+from pyspark.ml.classification import GBTClassifier
+from pyspark.ml.evaluation import BinaryClassificationEvaluator
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+
+# Create the spark session
+spark = SparkSession \
+        .builder.master("local[4]")\
+        .config("spark.local.dir","/fastdata/acp19cj") \
+        .appName("SML_Assignment2")\
+        .getOrCreate()
+
+sc = spark.sparkContext
+sc.setLogLevel("WARN")
+# Escape from the notation
+Data = spark.read.csv("./HIGGS.csv.gz", sep=',')
+
+# Create a new type named df to store the 
+col_name = Data.columns
+for i in range(len(Data.columns)):
+        Data = Data.withColumn(col_name[i],Data[col_name[i]].cast(DoubleType()))
+Data = Data.withColumnRenamed("_c0","label")
+
+# Split the whole dataset into scalable dataset and remain dataset
+(scaleData,remainData) = Data.randomSplit([0.05,0.95],23)
+# Split the scalable data into train and test data set
+(traindata,testdata) = scaleData.randomSplit([0.7,0.3],23)
+
+# ******        RandomForest           ******
+# Next we could establish the pipeline.In this stage we could establish the two model used the 5% data to choose the best configuration
+# Generate the feature vector
+assembler = VectorAssembler(inputCols = col_name[1:len(col_name)], outputCol = 'features')
+# RandomForestRegressor
+Tree_model = RandomForestClassifier(labelCol="label", featuresCol="features")
+pipeline_Tree = Pipeline(stages=[assembler,Tree_model])
+
+
+grid_forest = ParamGridBuilder()\
+            .addGrid(Tree_model.numTrees,[20,25,30]) \
+            .addGrid(Tree_model.featureSubsetStrategy,["log2","auto","all"])\
+            .addGrid(Tree_model.subsamplingRate,[0.5,0.75,1.0])\
+            .build()
+
+crossval_Tree = CrossValidator(estimator=pipeline_Tree,
+                          estimatorParamMaps=grid_forest,
+                          evaluator=MulticlassClassificationEvaluator(),
+                          numFolds=3,
+                          seed=23)
+
+# Run the model and Choose the best parameters
+cvModel_random = crossval_Tree.fit(traindata)
+
+# Obtain the best parameters from the model
+rf_numTrees = cvModel_random.bestModel.stages[1]._java_obj.getNumTrees()
+rf_featureSubsetStrategy = cvModel_random.bestModel.stages[1]._java_obj.getFeatureSubsetStrategy()
+rf_subsamplingRate = cvModel_random.bestModel.stages[1]._java_obj.getSubsamplingRate()
+
+text_file = open("result.txt", "a+")
+text_file.write("Best numTree: "+str(rf_numTrees)+"\n")
+text_file.write("Best FeatureSubsetStrategy: "+str(rf_featureSubsetStrategy)+"\n")
+text_file.write("Best SubsamplingRate: "+str(rf_subsamplingRate)+"\n")
+
+# Now we could use the BinaryClassificationEvaluator to evaluate the model
+prediction_random = cvModel_random.transform(testdata)
+prediction_random = prediction_random.select("prediction","label")
+
+# Now we can calculate the AUC(Area under Curve)
+evaluator_accuracy = MulticlassClassificationEvaluator(labelCol="label", predictionCol="prediction", metricName="accuracy")
+evaluator_auc = BinaryClassificationEvaluator(labelCol="label", rawPredictionCol="prediction", metricName="areaUnderROC")
+accuracy_auc = evaluator_auc.evaluate(prediction_random)
+accuracy = evaluator_accuracy.evaluate(prediction_random)
+
+text_file.write("Random Tree Model Accuracy: "+str(accuracy)+"\n")
+text_file.write("Random Tree Model AUC: "+str(accuracy_auc)+"\n")
+text_file.write("\n")
+text_file.write("\n")
+text_file.write("\n")
+
+# ******        GBT           ******
+# Now imply the Gradient Boosting
+grad_model =  GBTClassifier(labelCol="label", featuresCol="features")
+pipeline_grad = Pipeline(stages=[assembler,grad_model])
+grid_grad =  ParamGridBuilder()\
+            .addGrid(grad_model.maxIter,[9,12,15])\
+            .addGrid(grad_model.maxDepth,[5,6,7])\
+            .addGrid(grad_model.subsamplingRate,[0.7,0.8,1.0])\
+            .build()
+crossval_grad = CrossValidator(estimator=pipeline_grad,
+                          estimatorParamMaps=grid_grad,
+                          evaluator=MulticlassClassificationEvaluator(),
+                          numFolds=3,
+                          seed=23)
+
+cvModel_grad = crossval_grad.fit(traindata)
+
+# Store the best parameter the remain will leave for default
+grad_maxIter = cvModel_grad.bestModel.stages[1]._java_obj.getMaxIter()
+grad_MaxDepth = cvModel_grad.bestModel.stages[1]._java_obj.getMaxDepth()
+grad_SubsamplingRate = cvModel_grad.bestModel.stages[1]._java_obj.getSubsamplingRate()
+
+text_file.write("GBT Model \n")
+text_file.write("Best MaxIter:"+str(grad_maxIter)+"\n")
+text_file.write("Best MaxDepth:"+str(grad_MaxDepth)+"\n")
+text_file.write("Best subsamplingRate:"+str(grad_SubsamplingRate)+"\n")
+
+# Now we could use the BinaryClassificationEvaluator to evaluate the model
+prediction_GBT = cvModel_grad.transform(testdata).select("prediction","label")
+
+# Imply the AUC in GBT
+auc_GBT = evaluator_auc.evaluate(prediction_GBT)
+accuracy_GBT = evaluator_accuracy.evaluate(prediction_GBT)
+text_file.write("GBT Accuracy: "+str(accuracy_GBT)+"\n")
+text_file.write("GBT AUC: "+str(auc_GBT)+"\n")
+text_file.write("\n")
+text_file.write("\n")
+text_file.write("\n")
+
+# Stage 2: Use hte full dataset
+# Now we should use the full set to train the previous cvModel_random and cvModel_grad
+# Split the full dataset into two parts train_f and test_f
+
+Data = assembler.transform(Data)
+(train_f,test_f) = Data.randomSplit([0.7,0.3],23)
+
+# Use the model trained in the previous 
+rf_full = RandomForestClassifier(labelCol="label", featuresCol="features",
+                                numTrees=rf_numTrees,
+                                featureSubsetStrategy=rf_featureSubsetStrategy,
+                                subsamplingRate=rf_subsamplingRate)
+grad_full = GBTClassifier(labelCol="label", featuresCol="features",
+                        maxIter = grad_maxIter,
+                        maxDepth = grad_MaxDepth,
+                        subsamplingRate = grad_SubsamplingRate)
+
+# Train two model using the best parameters
+start_time = time.clock()
+rf_model = rf_full.fit(train_f)
+end_time = time.clock()
+text_file.write("The Train Time of RandomTree: "+str(end_time-start_time)+"\n")
+start_time = time.clock()
+grad_model = grad_full.fit(train_f)
+end_time = time.clock()
+text_file.write("The Train Time of GBT: "+str(end_time-start_time)+"\n")
+
+# Transform Test dataset into RandomTree
+rf_prediction = rf_model.transform(test_f).select("prediction","label")
+rf_full_auc = evaluator_auc.evaluate(rf_prediction)
+text_file.write("The RandomTree full dataset AUC value:"+str(rf_full_auc)+"\n")
+
+# Transform Test dataset into GBT
+GBT_prediction = grad_full.transform(test_f).select("prediction","label")
+GBT_full_auc = evaluator_auc.evaluate(GBT_prediction)
+text_file.write("The GBT full dataset AUC value: "+(GBT_full_auc)+"\n")
+text_file.write("\n")
+text_file.write("\n")
+
+# Now we should output the Importance of feature
+rf_feature_im = cvModel_random.bestModel.stages[1].featureImportances.toArray()
+rf_string = " "
+for i in range(len(rf_feature_im)):
+    rf_string = rf_string + str(float(rf_feature_im[i]))
+text_file.write("Random Forest Features Importance: "+rf_string+"\n")
+
+grad_feature_im = cvModel_grad.bestModel.stages[1].featureImportances.toArray()
+grad_string = " "
+for i in range(len(rf_feature_im)):
+    grad_string = grad_string + str(float(rf_feature_im[i]))
+text_file.write("Random GBT Features Importance: "+ grad_string+"\n")
+
+text_file.close()
