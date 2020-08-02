@@ -1,0 +1,281 @@
+#import pyspark
+import numpy as np
+from pyspark.sql import SparkSession
+from pyspark.ml.evaluation import RegressionEvaluator
+from pyspark.ml.recommendation import ALS
+import matplotlib.pyplot as plt
+
+from pyspark.ml.clustering import KMeans,KMeansModel
+from pyspark.sql.functions import udf,desc
+from pyspark.ml.linalg import Vectors,VectorUDT
+from pyspark.sql import types as T
+
+spark = SparkSession.builder \
+    .master("local[5]") \
+    .config("sprak.local.dir","/fastdata/acs19zl")
+    .appName("COM6012 Assignment 1") \
+    .getOrCreate()
+sc = spark.sparkContext
+sc.setLogLevel("WARN") 
+
+#******************************************************************************************************
+# Q2 A 
+
+# load data
+ratings = spark.read.load("Data/ml-25m/ratings.csv",format="csv", inferSchema="true", header="true")
+
+# Dividing the data set into three subsets
+(data1,data2,data3) = ratings.randomSplit([0.3,0.3,0.3],2020)
+
+# Create three train and test sets
+# k-1 train_1 = data1+data2 test_1 = data3
+train_1=data1.union(data2)
+test_1=data3
+# k-2 train_2 = data1+data3 test_2 = data2
+train_2=data1.union(data3) 
+test_2=data2
+# k-3 train_3 = data2+data3 test_3 = data1
+train_3=data2.union(data3)
+test_3=data1
+
+# Add three sets of data to the list
+data_list=[]
+data_list.append((train_1,test_1))
+data_list.append((train_2,test_2))
+data_list.append((train_3,test_3))
+
+# Training model
+def als_model(data_list):
+    # set ALS model
+    #model 1
+    als_1 = ALS(maxIter=10, regParam=0.1, userCol="userId", itemCol="movieId", ratingCol="rating",
+          coldStartStrategy="drop")
+    #model 2
+    als_2 = ALS(maxIter=20, regParam=0.1, userCol="userId", itemCol="movieId", ratingCol="rating",
+          coldStartStrategy="drop")
+    #model 3
+    als_3 = ALS(maxIter=10, regParam=0.2, userCol="userId", itemCol="movieId", ratingCol="rating",
+          coldStartStrategy="drop",nonnegative=True)
+    
+    # create evaluator
+    evaluator_rmse = RegressionEvaluator(metricName="rmse", labelCol="rating",predictionCol="prediction")
+    evaluator_mae = RegressionEvaluator(metricName="mae", labelCol="rating",predictionCol="prediction")
+    
+    # model 1 result
+    rmse_list_1=[]
+    mae_list_1=[]
+    # model 2 result
+    rmse_list_2=[]
+    mae_list_2=[]
+    # model 3 result
+    rmse_list_3=[]
+    mae_list_3=[]
+    
+    # save model 1 to question C
+    model_list=[]
+    
+    for i in range(len(data_list)): # 3
+        # load train and test data
+        train = data_list[i][0]
+        test = data_list[i][1]
+        
+        # train three model
+        model_1 = als_1.fit(train)
+        model_2 = als_2.fit(train)
+        model_3 = als_3.fit(train)
+
+        # prediction
+        predictions_1 = model_1.transform(test)
+        predictions_2 = model_2.transform(test)
+        predictions_3 = model_3.transform(test)
+        
+        # compute RMSE and MAE
+        rmse_1 = evaluator_rmse.evaluate(predictions_1)
+        mae_1 = evaluator_mae.evaluate(predictions_1)
+        rmse_list_1.append((i,rmse_1))
+        mae_list_1.append((i,mae_1))
+        
+        rmse_2 = evaluator_rmse.evaluate(predictions_2)
+        mae_2 = evaluator_mae.evaluate(predictions_2)
+        rmse_list_2.append((i,rmse_2))
+        mae_list_2.append((i,mae_2))
+        
+        rmse_3 = evaluator_rmse.evaluate(predictions_3)
+        mae_3 = evaluator_mae.evaluate(predictions_3)
+        rmse_list_3.append((i,rmse_3))
+        mae_list_3.append((i,mae_3))
+        
+        # save model 1
+        model_list.append(model_1)
+        
+    return rmse_list_1,mae_list_1,rmse_list_2,mae_list_2,rmse_list_3,mae_list_3,model_list
+
+rmse_list_1,mae_list_1,rmse_list_2,mae_list_2,rmse_list_3,mae_list_3,model_list = als_model(data_list)
+
+# Compute mean and std for RMSE and MAE
+def compute_mean_std(data_list):
+    data=[]
+    for i in range(len(data_list)):
+        data.append(data_list[i][1])
+    result_mean = np.mean(data)
+    result_std = np.std(data)
+    return result_mean,result_std
+# model 1
+model1_rmse_mean,model1_rmse_std = compute_mean_std(rmse_list_1)
+model1_mae_mean,model1_mae_std = compute_mean_std(mae_list_1)
+# model 2
+model2_rmse_mean,model2_rmse_std = compute_mean_std(rmse_list_2)
+model2_mae_mean,model2_mae_std = compute_mean_std(mae_list_2)
+# model 3
+model3_rmse_mean,model3_rmse_std = compute_mean_std(rmse_list_3)
+model3_mae_mean,model3_mae_std = compute_mean_std(mae_list_3)
+
+# write result to a output .txt file
+file = open("Q2A_output.txt",'w')
+
+# model 1
+file.write("ALS model 1"+'\n')
+file.write("RMSE"+'\n')
+for i in range(len(rmse_list_1)):
+	file.write(str(rmse_list_1[i])+'\n')
+file.write("MAE"+'\n')
+for i in range(len(mae_list_1)):
+	file.write(str(mae_list_1[i])+'\n')
+file.write("RMSE mean"+str(model1_rmse_mean)+'\n')
+file.write("RMSE std"+str(model1_rmse_std)+'\n')
+file.write("MAE mean"+str(model1_mae_mean)+'\n')
+file.write("MAE std"+str(model1_mae_std)+'\n')
+file.write('\n')
+
+# model 2
+file.write("ALS model 2"+'\n')
+file.write("RMSE"+'\n')
+for i in range(len(rmse_list_2)):
+	file.write(str(rmse_list_2[i])+'\n')
+file.write("MAE"+'\n')
+for i in range(len(mae_list_2)):
+	file.write(str(mae_list_2[i])+'\n')
+file.write("RMSE mean"+str(model2_rmse_mean)+'\n')
+file.write("RMSE std"+str(model2_rmse_std)+'\n')
+file.write("MAE mean"+str(model2_mae_mean)+'\n')
+file.write("MAE std"+str(model2_mae_std)+'\n')
+file.write('\n')
+
+# model 3
+file.write("ALS model 3"+'\n')
+file.write("RMSE"+'\n')
+for i in range(len(rmse_list_3)):
+	file.write(str(rmse_list_3[i])+'\n')
+file.write("MAE"+'\n')
+for i in range(len(mae_list_3)):
+	file.write(str(mae_list_3[i])+'\n')
+file.write("RMSE mean"+str(model3_rmse_mean)+'\n')
+file.write("RMSE std"+str(model3_rmse_std)+'\n')
+file.write("MAE mean"+str(model3_mae_mean)+'\n')
+file.write("MAE std"+str(model3_mae_std)+'\n')
+
+# Visualise the mean and std of RMSE and MAE for each of the three versions of ALS
+# subplot 1 
+plt.subplot(2,1,1)
+name_list = ['ALS 1','ALS 2','ALS 3']
+x = list(range(len(rmse_mean)))
+total_width,n = 0.7,2
+width = total_width/n
+plt.xlabel("ALS version")
+plt.ylabel("Mean value")
+plt.title("The mean of RMSE and MAE for three ALS")
+plt.bar(x, rmse_mean, width=width, label='RMSE',fc = 'y')
+for i in range(len(x)):
+    x[i] = x[i] + width
+plt.bar(x, mae_mean, width=width, label='MAE',tick_label = name_list,fc = 'r')
+plt.legend()
+
+# subplot 2
+plt.subplot(2,1,2)
+name_list2 = ['ALS 1','ALS 2','ALS 3']
+x2 = list(range(len(rmse_std)))
+total_width2,n2 = 0.7,2
+width2 = total_width2/n2
+plt.xlabel("ALS version")
+plt.ylabel("Std value")
+plt.title("The std of RMSE and MAE for three ALS")
+plt.bar(x2, rmse_std, width=width2, label='RMSE',fc = 'y')
+for i in range(len(x2)):
+    x2[i] = x2[i] + width2
+plt.bar(x2, mae_std, width=width2, label='MAE',tick_label = name_list2,fc = 'r')
+plt.legend()
+
+# save figure
+plt.subplots_adjust(wspace =0, hspace =1)
+flg = plt.gcf()
+flg.tight_layout()
+plt.savefig("Q2A_barchart.png")
+
+#*******************************************************************************************
+# Q2 C
+def vector_to_array(v):
+    new_array = list([float(x) for x in v])
+    return new_array
+
+# Load file (genome-scores.csv, genome-tags.csv, tags.csv)
+genome_score = spark.read.load("Data/ml-25m/genome-scores.csv",format="csv", inferSchema="true", header="true")
+genome_tags = spark.read.load("Data/ml-25m/genome-tags.csv",format="csv", inferSchema="true", header="true")
+movie_tags = spark.read.load("Data/ml-25m/tags.csv",format="csv", inferSchema="true", header="true")
+
+# Create a list holding the final results
+diff_split_result_list = []
+for i in range(len(model_list)):
+    # Load the model trained in the previous question
+    model = model_list[i]
+    # extract item factors
+    df = model.itemFactors
+    # transfer feature to dense vectors
+    df_v = df.rdd.map(lambda r:[Vectors.dense(r[1])]).toDF(['features'])
+    #vector_udf = udf(lambda x:Vectors.dense(x),VectorUDT())
+    #df_v_1 = df.select(vector_udf(df['features']).alias('features_v'))
+
+    # train k-mean model
+    kmeans = KMeans().setK(25).setSeed(2020)
+    model_kmean = kmeans.fit(df_v)
+    # transform prediction
+    predictions = model_kmean.transform(df_v)
+
+    # compute top 3 cluster then add result to list
+    top3_cluster_list = predictions.groupby("prediction").count().sort(desc('count')).limit(3).collect()
+
+    # Put movie id and corresponding predict k into one dataframe
+    udf_vector_to_array = udf(vector_to_array, T.ArrayType(T.FloatType()))
+    # Convert the vector format in prediction dataframe to array, used to join two dataframe
+    predictions_array = predictions.withColumn('features', udf_vector_to_array('features'))
+    # joint two dataframe then Duplicated datasets
+    final_data = df.join(predictions_array, on='features',how='left').dropDuplicates()
+    # Create a list that store the results of three clusters in one split
+    diff_cluster_result_list = []
+    for j in range(len(top3_cluster_list)):
+        # Extract the number of the  cluster
+        cluster_num = top3_cluster_list[j][0]
+        # Select data with a predicted value of cluster and extract movie id and prediction cluster number
+        movieid_pred=final_data.filter(final_data['prediction']==cluster_num).select(final_data.id.alias('movieId'),final_data.prediction)
+        # Extract corresponding data in the genome-tag files based on movieid
+        movieid_tag = genome_score.join(movieid_pred,on='movieId',how='right')
+        # Calculate the sum of relevacne values for each tag and extract top 3 tag score to list
+        top3_tag_list = movieid_tag.groupby('tagId').sum('relevance').sort(desc('sum(relevance)')).limit(3).collect()
+        # extract corresponding data in the tags.csv file based on movieid
+        tags_df = movie_tags.select(movie_tags.movieId,movie_tags.tag)
+        movieid_tag_count = tags_df.join(movieid_pred,on='movieId',how='right')
+        # Create a list that store the results of three clusters in one split
+        one_cluster_tag_name_list = []
+        for k in range(len(top3_tag_list)):
+            tag_id = top3_tag_list[k][0]
+            tag_name = genome_tags.filter(genome_tags['tagId']==tag_id).select(genome_tags.tagId,genome_tags.tag).collect()
+            # count the number of movies having each of this tags
+            tag_count = movieid_tag_count.filter(movieid_tag_count['tag']==tag_name[0][1]).count()
+            # add result to list 
+            one_cluster_tag_name_list.append((tag_name,tag_count))
+
+        diff_cluster_result_list.append((cluster_num,one_cluster_tag_name_list))
+
+    diff_split_result_list.append((i,diff_cluster_result_list))
+
+file = open("Q2C_output.txt",'w')
+file.write(str(diff_split_result_list))
