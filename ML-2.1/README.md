@@ -1,6 +1,6 @@
 # Log Mining
 **Data**:
-the *[NASA access log July 1995 data](ftp://ita.ee.lbl.gov/traces/NASA_access_log_Jul95.gz)*.
+the [NASA access log July 1995 data](ftp://ita.ee.lbl.gov/traces/NASA_access_log_Jul95.gz).
 Please read the *[dataset description](ftp://ita.ee.lbl.gov/html/contrib/NASA-HTTP.html)* to understand the data and complete the following four tasks.
 
 
