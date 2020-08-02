@@ -14,7 +14,7 @@ D. Visualise the results in C above as a figure.
 # Movie Recommendation
 **Data**:
 the *[MovieLens 25M Dataset](https://grouplens.org/datasets/movielens/25m/)*. 
-Please read the *[dataset description](http://files.grouplens.org/datasets/movielens/ml-25m-README.html)* to understand the data and complete the following four tasks.
+Please read the *[dataset description](http://files.grouplens.org/datasets/movielens/ml-25m-README.html)* to understand the data and complete the following tasks.
 
 A. Perform a **three-fold cross validation** of ALS-based recommendation on the rating data **ratings.csv**. Study **three** versions of ALS: one with the ALS setting used in Lab 3 notebook, and another **two different settings decided by you**. For each split, compute the Root Mean Square Error (RMSE) and Mean Absolute Error (MAE) for the three ALSs. Then compute the mean and standard deviation (std) of RMSE and MAE over the three splits. Put these RMSE and MAE results for each of the three splits as well as the mean & the std in one Table for the three ALSs in the report (2 x 5 x 3 = 30 numbers in total). Visualise the mean and std of RMSE and MAE for each of the three versions of ALS in one single figure. 
 
