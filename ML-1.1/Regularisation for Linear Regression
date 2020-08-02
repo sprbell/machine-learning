@@ -1,0 +1,169 @@
+# download data
+import pods
+pods.util.download_url('https://archive.ics.uci.edu/ml/machine-learning-databases/00360/AirQualityUCI.zip')
+import zipfile
+zip = zipfile.ZipFile('./AirQualityUCI.zip', 'r')
+for name in zip.namelist():
+    zip.extract(name, '.')
+    
+# The .csv version of the file has some typing issues, so we use the excel version
+import pandas as pd 
+air_quality = pd.read_excel('./AirQualityUCI.xlsx', usecols=range(2,15)
+
+# example
+air_quality.sample(5)
+
+# split the dataset 
+import numpy as np
+np.random.seed(55555)                 # Make sure we use the proper seed
+ndata = air_quality['CO(GT)'].count() # We count how many rows are there in the dataframe
+index = np.random.permutation(ndata)  # We permute the indexes 
+n = np.int(np.round(0.7*ndata))       # We compute n, the number of training points  
+data_training = air_quality.iloc[index[0:n], :] # Select the training data
+data_test = air_quality.iloc[index[n+1:ndata], :] # Select the test data
+
+# processing the data
+# missing value
+# We first remove the rows for which there are missing values in the target feature
+data_training = data_training.loc[data_training.iloc[:, 0]!=-200, :]
+
+# We now remove the columns (features) for which there are more that 20% of missing values
+n = np.size(data_training, 0)      # New number of data observations after removing those with no target value
+ncols = np.size(data_training, 1)  # Number of columns in the dataframe
+nmissing = np.empty(ncols)         # An empty vector that will keep the number of missing values per feature
+pmissing = np.empty(ncols)         # An empty vector that will keep the percentage of missing values per feature
+for i in range(ncols):
+  nmissing[i] = (data_training.iloc[:, i]==-200).sum()
+  pmissing[i] = nmissing[i]/n
+data_training = data_training.loc[:, pmissing < 0.2]
+
+# We go again through the features replacing the missing values with the average of the no missing values. 
+ncols = np.size(data_training, 1) # We need to count again the number of columns
+no_missing_means = np.empty(ncols)
+names_columns = data_training.columns[0:ncols]
+for i in range(0, ncols):    
+        value_mean = np.mean(data_training.loc[data_training.iloc[:, i]!=-200, names_columns[i]])
+        data_training.loc[data_training.iloc[:, i]==-200, names_columns[i]] = value_mean  
+        
+# Normalising the training data
+uX =  (data_training.iloc[:, 1:ncols]).values
+D = np.size(uX, 1)
+meansX = np.mean(uX, 0)
+stdX = np.std(uX, 0)
+nX = np.empty((n, D))
+for i in range(D):
+    nX[:, i] = (uX[:, i] - meansX[i])/stdX[i]  
+    
+# Training and validation stages
+y = np.reshape((data_training.iloc[:, 0]).values, (n,1))
+X = np.concatenate((np.ones((n,1)), nX), axis=1)
+
+#  training with closed form expression for w
+num = 20
+alpha_vector = np.logspace(-3, 2, num)
+
+# We now partition the data into the training set and the validation set
+np.random.seed(55555)                 # Make sure we use the proper seed
+index = np.random.permutation(n)  # We permute the indexes 
+n2 = np.int(np.round(0.7*n))       # We compute n2, the number of training points  
+yTrain = y[index[0:n2], :]             # Get the labels for the training set
+XTrain = X[index[0:n2], :]             # Get the design matrix for the training set
+yVal = y[index[n2+1:n], :]         # Get the labels for the validation set
+XVal = X[index[n2+1:n], :]         # Get the design matrix for the validation set
+
+# Compute the MSE for all the values of alpha
+mse_alpha_val = np.empty(num)
+for i in range(0, num-1):
+    alpha = alpha_vector[i]
+    w = np.linalg.solve((XTrain.T@XTrain + (alpha*n2/2)*np.eye(D+1)), XTrain.T@yTrain)
+    fVal = XVal@w
+    eVal = yVal-fVal
+    mse_alpha_val[i] = np.mean(eVal*eVal)
+alpha = alpha_vector[np.argmin(mse_alpha_val)]
+
+# validation with the closed form expression for w
+# We first remove the rows for which there are missing values in the target feature
+data_test = data_test.loc[data_test.iloc[:, 0]!=-200, :]
+# We need to remove now those feature for which, at training time, we had more than 20% 
+# missing value
+data_test = data_test.loc[:, pmissing < 0.2]
+# We now replace the missing values on each feature variable with the mean of X
+for i in range(1, ncols):            
+        data_test.loc[data_test.iloc[:, i]==-200, names_columns[i]] = meansX[i-1]     
+
+# We now normalise the test data
+uXTest =  (data_test.iloc[:, 1:ncols]).values
+nTest = np.size(uXTest, 0)
+nXTest = np.empty((nTest, D))
+for i in range(D):
+    nXTest[:, i] = (uXTest[:, i] - meansX[i])/stdX[i]
+# We set the targets and build the design matrix for the test data
+yTest = np.reshape((data_test.iloc[:, 0]).values, (nTest,1))
+XTest = np.concatenate((np.ones((nTest,1)), nXTest), axis=1)
+# Compute w again with the best value of alpha
+w = np.linalg.solve((X.T@X + alpha*n*np.eye(D+1)), X.T@y)
+wCF = w
+# Compute MSE on the test data
+fTest = XTest@w
+eTest = yTest - fTest
+error_test = np.mean(eTest*eTest)
+# Plot the histogram of the absolute error
+%matplotlib inline 
+import pylab as plt
+plt.hist(np.abs(yTest - fTest))
+
+# training with gradient descent and validation
+
+num = 5
+alpha_vector = np.logspace(-3, 0, num)
+eta_vector = np.logspace(-3, 0, num)
+B_vector = np.linspace(50, 500, num)
+max_iters = 100
+# TRAINING STAGE
+# Compute the MSE for all the values of alpha, eta and B
+mse_val = np.empty([num, num, num])
+for i in range(0, num):
+    for j in range(0, num):
+        for k in range(0, num):
+            alpha = alpha_vector[i]
+            eta = eta_vector[j]
+            B = np.int(np.floor(B_vector[k]))
+            np.random.seed(55555)                 # Use the same seed to initialise w
+            w = np.random.normal(loc=0.0, scale=1.0, size= [D+1, 1])
+            for iters in range(0, max_iters):
+                # We first choose a random subset B of the available training set
+                index = np.random.permutation(n2)
+                Xb = XTrain[index[0:B], :]
+                yb = yTrain[index[0:B], :]
+                gradient = -(2/B)*(Xb.T@yb) + (2/B)*(Xb.T@Xb@w) + alpha*w
+                w = w - eta*gradient
+            fVal = XVal@w
+            eVal = yVal - fVal
+            mse_val[i, j, k] = np.mean(eVal*eVal) # Compute the MSE for all combinations 
+best_params = np.argwhere(mse_val == np.min(mse_val))
+alpha = alpha_vector[best_params[0][0]]
+eta   = eta_vector[best_params[0][1]]
+B = np.int(np.round(B_vector[best_params[0][2]]))
+# TEST STAGE
+np.random.seed(55555)  # Use the same seed to initialise w
+w = np.random.normal(loc=0.0, scale=1.0, size= [D+1, 1])
+for iters in range(0, max_iters):
+    index = np.random.permutation(n)
+    Xb = X[index[0:B], :] # We are now using ALL the training data to select the minibatch
+    yb = y[index[0:B], :] # We are now using ALL the training data to select the minibatch
+    gradient = -(2/B)*(Xb.T@yb) + (2/B)*(Xb.T@Xb@w) + alpha*w
+    w = w - eta*gradient
+wMB = w
+fTestGD = XTest@w
+eTestGD = yTest - fTestGD
+error_testGD = np.mean(eTestGD*eTestGD)
+# Plot the histogram of the absolute error
+%matplotlib inline 
+import pylab as plt
+plt.hist(np.abs(yTest - fTestGD))
+
+# We compare wCF (closed-form) and wMB (minin-batch)
+both_w = np.concatenate((wCF, wMB), axis=1)
+both_w        
+        
+        
